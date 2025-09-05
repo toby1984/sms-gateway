@@ -1,0 +1,10 @@
+[Unit]
+Description=Simple Golang program that accepts incoming REST requests and turns them into SMS messages send via a Huawei E3351 HSPDA modem
+
+[Service]
+ExecStart=/apps/sms-gateway/sms-gateway /apps/sms-gateway/configuration.ini
+Type=simple
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
