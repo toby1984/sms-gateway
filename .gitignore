@@ -1,0 +1,5 @@
+*.log
+go.sum
+.idea
+test.conf
+dist
