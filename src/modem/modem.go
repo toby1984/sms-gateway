@@ -12,6 +12,14 @@ import (
 	"sync"
 )
 
+/*
+ *Huawei init according to modem manager:
+ *
+ *
+ * AT^CURC=0
+ *
+ */
+
 var log = logger.GetLogger("modem")
 
 var appConfig *config.Config
@@ -207,22 +215,26 @@ func sendBytes(bytes []byte) ([]string, error) {
 		log.Error("failed to drain() serial port: " + err.Error())
 		return []string{}, err
 	}
-	var receivedBytes = make([]byte, 1024, 1024)
-	bytesRead, err := (*serialPort).Read(receivedBytes)
+
+	var readResult = func() CharResult {
+		var receivedByte = make([]byte, 1)
+		bytesRead, err := (*serialPort).Read(receivedByte)
+		if err != nil {
+			return CharResult{char: 0x00, timeout: false, err: err}
+		}
+		if bytesRead == 0 {
+			return CharResult{char: 0x00, timeout: true, err: nil}
+		}
+		return CharResult{char: receivedByte[0], timeout: false, err: nil}
+	}
+
+	lines, err := parseModemResponse(readResult)
 	if err != nil {
 		log.Error("failed to read() to serial port: " + err.Error())
 		return []string{}, err
 	}
-	if bytesRead == 0 {
-		return []string{}, nil
-	}
-	res := string(receivedBytes[:bytesRead])
-	splitRegex := regexp.MustCompile("[\r\n]")
-	var lines []string
-	for _, line := range splitRegex.Split(res, -1) {
-		if strings.TrimSpace(line) != "" {
-			lines = append(lines, line)
-		}
+	if log.IsDebugEnabled() {
+		log.Debug("sendBytes(): Modem response:\n" + strings.Join(lines, "\n"))
 	}
 	return lines, nil
 }

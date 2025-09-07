@@ -16,6 +16,10 @@ var log = logger.GetLogger("main")
 func main() {
 	log.Info("sms-gateway v1.0")
 
+	// --------- DEBUG code
+
+	// ---------- DEBUG code
+
 	if len(os.Args) != 2 {
 		panic("Invalid command line - expected config file as only argument")
 	}
