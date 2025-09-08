@@ -52,6 +52,14 @@ type responseMatcher struct {
 	lines             []string
 }
 
+func (r *responseMatcher) isEmpty() bool {
+	return len(r.lines) == 0
+}
+
+func (r *responseMatcher) lastLine() string {
+	return r.lines[len(r.lines)-1]
+}
+
 func (r *responseMatcher) resetStateMachine() {
 	r.currentlyMatching = startingNewline
 	r.matched = r.matched[:0]
@@ -129,7 +137,7 @@ func (r *responseMatcher) flushCharBuffer() {
 	}
 }
 
-func parseModemResponse(byteFromModem CharProvider) ([]string, error) {
+func parseModemResponse(byteFromModem CharProvider, requiresOkOrError bool) ([]string, error) {
 
 	matcher := responseMatcher{}
 	matcher.resetStateMachine()
@@ -141,19 +149,27 @@ loop:
 			return nil, nextChar.err
 		}
 		if nextChar.timeout {
+			if requiresOkOrError {
+				log.Debug("Timeout but still expecting OK or ERROR, keep waiting for response")
+				continue
+			}
 			break
 		}
 		var parserState = matcher.tryMatch(nextChar.char)
 		switch parserState {
 		case PARSE_STATE_MATCH_DONE:
 			matcher.buffer.WriteByte(nextChar.char)
-			if matcher.wasMatched(okMsg) || matcher.wasMatched(errorMsg) {
+			definitiveResponseEndingDetected := matcher.wasMatched(okMsg) || matcher.wasMatched(errorMsg)
+			if definitiveResponseEndingDetected {
 				// we've reached the last line of the modem's response,
 				// either <cr><lf>OK<cr><lf> or <cr><lf>ERROR<cr><lf>
 				break loop
 			}
 			// not the last line of the modem's response yet
 			matcher.flushCharBuffer()
+			if !matcher.isEmpty() && strings.Contains(matcher.lastLine(), "ERROR") {
+				break loop
+			}
 			matcher.resetStateMachine()
 		case PARSE_STATE_MATCH_CONTINUE:
 			if matcher.currentlyMatching == startingNewline && matcher.currentlyMatching.currentIndex == 1 {

@@ -12,7 +12,7 @@ func encode(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\r", "<CR>"), "\n", "<LF>")
 }
 
-func runTest(input string, expected []string, t *testing.T) {
+func runTest(input string, expected []string, requiresOkOrError bool, t *testing.T) {
 
 	println("Testing: " + encode(input))
 
@@ -27,7 +27,7 @@ func runTest(input string, expected []string, t *testing.T) {
 		currentIndex++
 		return CharResult{char: c, timeout: false, err: nil}
 	}
-	lines, err := parseModemResponse(charProvider)
+	lines, err := parseModemResponse(charProvider, requiresOkOrError)
 	if err != nil {
 		t.Errorf("failed to parse response: %s", err.Error())
 	} else {
@@ -44,17 +44,17 @@ func runTest(input string, expected []string, t *testing.T) {
 }
 
 func TestParse(t *testing.T) {
-	runTest("test\r\nOK\r\n", []string{"test", "OK"}, t)
-	runTest("test", []string{"test"}, t)
-	runTest("\r\n", []string{}, t)
-	runTest("\r\n\r\n", []string{}, t)
-	runTest("test\r\ntest", []string{"test", "test"}, t)
-	runTest("test\r\ntest\r\n", []string{"test", "test"}, t)
-	runTest("OK\r\ntest\r\n", []string{"OK"}, t)
-	runTest("ERROR\r\ntest\r\n", []string{"ERROR"}, t)
+	runTest("test\r\nOK\r\n", []string{"test", "OK"}, true, t)
+	runTest("test", []string{"test"}, false, t)
+	runTest("\r\n", []string{}, false, t)
+	runTest("\r\n\r\n", []string{}, false, t)
+	runTest("test\r\ntest", []string{"test", "test"}, false, t)
+	runTest("test\r\ntest\r\n", []string{"test", "test"}, false, t)
+	runTest("OK\r\ntest\r\n", []string{"OK"}, true, t)
+	runTest("ERROR\r\ntest\r\n", []string{"ERROR"}, false, t)
 
 	s := "<CR><LF>+CGDCONT: (1-11),\"IP\",,,(0-2),(0-3),(0,1),(0,1)<CR><LF>+CGDCONT: (1-11),\"PPP\",,,(0-2),(0-3),(0,1),(0,1)<CR><LF><CR><LF><CR><LF>OK<CR><LF>"
 	runTest(s, []string{"+CGDCONT: (1-11),\"IP\",,,(0-2),(0-3),(0,1),(0,1)",
 		"+CGDCONT: (1-11),\"PPP\",,,(0-2),(0-3),(0,1),(0,1)",
-		"OK"}, t)
+		"OK"}, true, t)
 }

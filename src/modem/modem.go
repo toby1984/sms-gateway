@@ -129,7 +129,7 @@ func (r *ModemResponse) Size() int {
 func queryPinState() (ModemPinState, error) {
 
 	log.Debug("Querying SIM card PIN state...")
-	response, err := sendCmd("AT+CPIN?")
+	response, err := sendCmd("AT+CPIN?", false)
 	if err != nil {
 		return MODEM_PIN_SERIAL_ERROR, err
 	}
@@ -169,7 +169,7 @@ func queryPinState() (ModemPinState, error) {
 }
 
 func sendPin(pin string) error {
-	resp, err := sendCmd("AT+CPIN=\"" + pin + "\"")
+	resp, err := sendCmd("AT+CPIN=\""+pin+"\"", true)
 	if err != nil {
 		return errors.New("Failed to send PIN to modem: " + err.Error())
 	}
@@ -200,7 +200,7 @@ func unlockSim() error {
 	return nil
 }
 
-func sendBytes(bytes []byte) ([]string, error) {
+func sendBytes(bytes []byte, requiresOkOrError bool) ([]string, error) {
 	bytesWritten, err := (*serialPort).Write(bytes)
 	if err != nil {
 		log.Error("failed to write to serial port: " + err.Error())
@@ -228,7 +228,7 @@ func sendBytes(bytes []byte) ([]string, error) {
 		return CharResult{char: receivedByte[0], timeout: false, err: nil}
 	}
 
-	lines, err := parseModemResponse(readResult)
+	lines, err := parseModemResponse(readResult, requiresOkOrError)
 	if err != nil {
 		log.Error("failed to read() to serial port: " + err.Error())
 		return []string{}, err
@@ -239,7 +239,7 @@ func sendBytes(bytes []byte) ([]string, error) {
 	return lines, nil
 }
 
-func sendCmd(cmd string) (ModemResponse, error) {
+func sendCmd(cmd string, requiresOkOrError bool) (ModemResponse, error) {
 
 	if serialPort == nil {
 		panic("Serial port not open?")
@@ -253,7 +253,7 @@ func sendCmd(cmd string) (ModemResponse, error) {
 		cmd = cmd + "\r"
 	}
 
-	lines, err := sendBytes([]byte(cmd))
+	lines, err := sendBytes([]byte(cmd), requiresOkOrError)
 	if err != nil {
 		return ModemResponse{Lines: []string{}}, errors.New("Failed to send bytes - " + err.Error())
 	}
@@ -263,7 +263,7 @@ func sendCmd(cmd string) (ModemResponse, error) {
 func switchToPlainText() error {
 	// switch modem to plain-text mode
 	// AT+CMGF=1
-	resp, err := sendCmd("AT+CMGF=1")
+	resp, err := sendCmd("AT+CMGF=1", true)
 	if err != nil {
 		return err
 	}
@@ -298,7 +298,7 @@ func SendSms(message string) SendResult {
 
 		log.Info("Sending sms to " + recipient)
 
-		response, err := sendCmd("AT+CMGS=\"" + recipient + "\"")
+		response, err := sendCmd("AT+CMGS=\""+recipient+"\"", false)
 		if err != nil {
 			log.Error("Failed to send sms to " + recipient + ": " + err.Error())
 			return SendResult{Success: false, Reason: MODEM_ERR_MODEM_ERROR, Details: err.Error()}
@@ -311,7 +311,7 @@ func SendSms(message string) SendResult {
 		log.Debug("Sending actual message: '" + message + "'")
 		toSent := []byte(message)
 		toSent = append(toSent, 0x1a) // message needs to be terminated with CTRL-Z (0x1a)
-		responseLines, err := sendBytes(toSent)
+		responseLines, err := sendBytes(toSent, true)
 		if err != nil {
 			return SendResult{Success: false, Reason: MODEM_ERR_MODEM_ERROR, Details: err.Error()}
 		}
