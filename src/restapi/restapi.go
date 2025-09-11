@@ -4,7 +4,8 @@ import (
 	"code-sourcery.de/sms-gateway/common"
 	"code-sourcery.de/sms-gateway/config"
 	"code-sourcery.de/sms-gateway/logger"
-	"code-sourcery.de/sms-gateway/modem"
+	"code-sourcery.de/sms-gateway/msgqueue"
+	"code-sourcery.de/sms-gateway/state"
 	"context"
 	"errors"
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,8 @@ import (
 )
 
 var log = logger.GetLogger("rest-api")
+
+var appState *state.State
 
 type SendSmsRequest struct {
 	Message string `json:"message"`
@@ -37,33 +40,42 @@ func sendSms(c *gin.Context) {
 		_ = c.AbortWithError(500, errors.New("SMS text cannot be empty or blank "))
 		return
 	}
-	var result = modem.SendSms(req.Message)
-	if !result.Success {
-		log.Error("Failed to send SMS with message " + req.Message + " - " + result.Details)
-		if result.Reason == modem.MODEM_ERR_RATE_LIMIT_EXCEEDED {
-			_ = c.AbortWithError(429, errors.New("Failed to send SMS - rate limit exceeded"))
-			return
-		}
-		_ = c.AbortWithError(500, errors.New("Failed to send SMS: "+result.Details))
+
+	msgId := appState.NewMessageId()
+
+	err := msgqueue.StoreMessage(msgId, req.Message)
+	if err != nil {
+		appState.DiscardMessageId(msgId)
+		_ = c.AbortWithError(500, errors.New("Failed to store message for sending: "+err.Error()))
 		return
 	}
 }
 
 func Shutdown() error {
+
+	var result error
 	if httpServer != nil {
 		log.Debug("Shutting down http server")
 		ctx, closeFunc := context.WithTimeout(context.Background(), time.Duration(2000)*time.Millisecond)
 		defer closeFunc()
-		return httpServer.Shutdown(ctx)
+		result = httpServer.Shutdown(ctx)
 	}
-	return nil
+	msgqueue.Shutdown()
+	return result
 }
 
-func Init(config *config.Config) error {
+func Init(config *config.Config, state *state.State) error {
 
-	log.Debug("REST API starting up.")
+	appState = state
+
+	err := msgqueue.Init(config, appState)
+	if err != nil {
+		panic(err)
+	}
+
 	host := config.GetBindIp()
 	port := config.GetBindPort()
+	log.Debug("REST API starting up on " + host + ":" + strconv.Itoa(port))
 
 	runGinInReleaseMode := config.GetLogLevel() != logger.LEVEL_DEBUG && config.GetLogLevel() != logger.LEVEL_TRACE
 	if runGinInReleaseMode {

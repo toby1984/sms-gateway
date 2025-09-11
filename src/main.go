@@ -8,22 +8,42 @@ import (
 	"code-sourcery.de/sms-gateway/state"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
 var log = logger.GetLogger("main")
 
 func main() {
-	log.Info("sms-gateway v1.0")
+	log.Info("sms-gateway v1.1")
 
 	// --------- DEBUG code
 
 	// ---------- DEBUG code
 
-	if len(os.Args) != 2 {
+	configFile := ""
+	sendTestSms := false
+
+	for idx, arg := range os.Args {
+		if idx > 0 {
+			if arg == "-test" || arg == "--test" {
+				sendTestSms = true
+			} else {
+				if strings.HasPrefix(arg, "-") {
+					panic("Invalid command line - unknown option '" + arg + "'")
+				}
+				if configFile != "" {
+					panic("Invalid command line - unknown extra argument '" + arg + "'")
+				}
+				configFile = arg
+			}
+		}
+	}
+
+	if configFile == "" {
 		panic("Invalid command line - expected config file as only argument")
 	}
-	appConfig, err := config.LoadConfig(os.Args[1])
+	appConfig, err := config.LoadConfig(configFile)
 	if err != nil {
 		panic(err)
 	}
@@ -32,22 +52,23 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	log.Debug("Loading application state...")
 	defer func(appState *state.State) {
 		_ = appState.WriteState()
 	}(appState)
 
-	err = modem.Init(appConfig, appState)
+	log.Debug("Starting REST api....")
+	err = restapi.Init(appConfig, appState)
 	if err != nil {
 		panic(err)
 	}
-	defer modem.Shutdown()
 
-	// modem.SendSms("test message")
-
-	err = restapi.Init(appConfig)
-	if err != nil {
-		panic(err)
+	if sendTestSms {
+		modem.SendSms("test SMS, please ignore")
+		modem.Close()
 	}
+
 	defer func() {
 		_ = restapi.Shutdown()
 	}()

@@ -5,6 +5,7 @@ import (
 	"code-sourcery.de/sms-gateway/logger"
 	"code-sourcery.de/sms-gateway/state"
 	"errors"
+	"fmt"
 	"go.bug.st/serial"
 	"regexp"
 	"strconv"
@@ -34,6 +35,19 @@ const (
 	MODEM_ERR_RATE_LIMIT_EXCEEDED
 	MODEM_ERR_MODEM_ERROR
 )
+
+func (failure FailureReason) String() string {
+	switch failure {
+	case MODEM_ERR_NONE:
+		return "MODEM_ERR_NONE"
+	case MODEM_ERR_RATE_LIMIT_EXCEEDED:
+		return "MODEM_ERR_RATE_LIMIT_EXCEEDED"
+	case MODEM_ERR_MODEM_ERROR:
+		return "MODEM_ERR_MODEM_ERROR"
+	default:
+		panic("Unhandled failure reason")
+	}
+}
 
 type SendResult struct {
 	Success bool
@@ -223,7 +237,12 @@ func sendBytes(bytes []byte, requiresOkOrError bool) ([]string, error) {
 			return CharResult{char: 0x00, timeout: false, err: err}
 		}
 		if bytesRead == 0 {
+			log.Debug("*** timeout ***")
 			return CharResult{char: 0x00, timeout: true, err: nil}
+		}
+		if log.IsDebugEnabled() {
+			hexStringLower := fmt.Sprintf("%x", receivedByte[0])
+			log.Debug("Received character: " + string(rune(receivedByte[0])) + " (0x" + hexStringLower + ")")
 		}
 		return CharResult{char: receivedByte[0], timeout: false, err: nil}
 	}
@@ -274,6 +293,29 @@ func switchToPlainText() error {
 }
 
 func SendSms(message string) SendResult {
+	result := internalSendSms(message)
+	if !result.Success {
+		if result.Reason == MODEM_ERR_MODEM_ERROR {
+			Close()
+		}
+	}
+	return result
+}
+
+func internalSendSms(message string) SendResult {
+
+	if appConfig.IsDebugDisableModem() {
+		log.Warn("Not sending any SMS, modem disabled by debug option in configuration")
+		log.Warn("Message: >" + message + "<")
+		return SendResult{true, MODEM_ERR_NONE, "success"}
+	}
+
+	if needsInit() {
+		err := initModem()
+		if err != nil {
+			return SendResult{Success: false, Reason: MODEM_ERR_MODEM_ERROR, Details: err.Error()}
+		}
+	}
 
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -320,51 +362,86 @@ func SendSms(message string) SendResult {
 		if !response.isOK() {
 			return SendResult{Success: false, Reason: MODEM_ERR_MODEM_ERROR, Details: response.String()}
 		}
-		appState.RememberSmsSend()
 	}
 	return SendResult{true, MODEM_ERR_NONE, "success"}
 }
 
 func Init(config *config.Config, state *state.State) error {
 
+	appConfig = config
+	appState = state
+	return initModem()
+}
+
+func initModem() error {
+
+	if appConfig.IsDebugDisableModem() {
+		return nil
+	}
+
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	appConfig = config
-	appState = state
-
 	mode := &serial.Mode{
-		BaudRate: config.GetSerialSpeed(),
+		BaudRate: appConfig.GetSerialSpeed(),
 		Parity:   serial.NoParity,
 		DataBits: 8,
 		StopBits: serial.OneStopBit,
 	}
 
-	log.Debug("Initializing modem on port " + config.GetSerialPort() + ", baud rate " + strconv.Itoa(config.GetSerialSpeed()))
+	log.Debug("Initializing modem on port " + appConfig.GetSerialPort() + ", baud rate " + strconv.Itoa(appConfig.GetSerialSpeed()))
 
 	// Open the serial port
-	port, err := serial.Open(config.GetSerialPort(), mode)
+	port, err := serial.Open(appConfig.GetSerialPort(), mode)
 	if err != nil {
-		var msg = "failed to open serial port '" + config.GetSerialPort() + "' - " + err.Error()
+		var msg = "failed to open serial port '" + appConfig.GetSerialPort() + "' - " + err.Error()
 		log.Error(msg)
 		return errors.New(msg)
 	}
-	err = port.SetReadTimeout(config.GetSerialReadTimeout())
+	err = port.SetReadTimeout(appConfig.GetSerialReadTimeout())
 	if err != nil {
-		var msg = "failed to set read timeout " + config.GetSerialReadTimeout().String() + " on serial port '" + config.GetSerialPort() + "' - " + err.Error()
+		var msg = "failed to set read timeout " + appConfig.GetSerialReadTimeout().String() + " on serial port '" + appConfig.GetSerialPort() + "' - " + err.Error()
 		log.Error(msg)
 		return errors.New(msg)
 	}
+
+	// need to already assign global variable here
+	// as sendCmd() uses it
 	serialPort = &port
+
+	cleanUp := func() {
+		_ = port.Close()
+		serialPort = nil
+	}
+
+	for _, cmd := range appConfig.GetModemInitCmds() {
+		log.Debug("Executing modem init cmd: '" + cmd + "'")
+		resp, err := sendCmd(cmd, true)
+		if err != nil {
+			cleanUp()
+			return err
+		}
+		if resp.isError() {
+			cleanUp()
+			return errors.New("Running modem initialization cmd " + cmd + " returned an error: " + resp.String())
+		}
+	}
 	return nil
 }
 
-func Shutdown() {
-	log.Debug("Shutting down modem")
+func needsInit() bool {
+	mutex.Lock()
+	defer mutex.Unlock()
+	return serialPort != nil
+}
+
+func Close() {
+
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if serialPort == nil {
+	if serialPort != nil {
+		log.Debug("Closing serial port")
 		_ = (*serialPort).Close()
 		serialPort = nil
 	}

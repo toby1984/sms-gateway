@@ -4,21 +4,45 @@ import (
 	"code-sourcery.de/sms-gateway/common"
 	"code-sourcery.de/sms-gateway/config"
 	"code-sourcery.de/sms-gateway/logger"
+	"code-sourcery.de/sms-gateway/message"
+	"encoding/json"
 	"errors"
 	"os"
-	"strconv"
-	"strings"
+	"sync"
 	"time"
 )
 
 var log = logger.GetLogger("state")
 
-var appConfig config.Config
-
 type Timestamp int64
 
+type internalState struct {
+
+	// !!! Make sure to adjust createCopy() when changing this structure
+	Timestamps []Timestamp `json:"msg_timestamps"`
+
+	// ID of last message that was successfully sent
+	LastSuccessfulMessageId *message.MessageId `json:"last_successful_message_id"`
+
+	// pending message IDs, ordered ascending by creation timestamp
+	// (element 0 = oldest message ID)
+	PendingMessageIds []message.MessageId `json:"pending_message_ids"`
+
+	// next ID to be used for a new, incoming message
+	NextMessageId message.MessageId `json:"next_message_id"`
+}
+
 type State struct {
-	timestamps []Timestamp
+	data internalState
+}
+
+var appConfig config.Config
+
+// mutex to protect state
+var mutex sync.Mutex
+
+func newInternalState() internalState {
+	return internalState{NextMessageId: message.FirstMessageId()}
 }
 
 /**
@@ -28,8 +52,8 @@ func (c *State) countSms(iv config.TimeInterval) int {
 	now := Timestamp(time.Now().Unix())
 	maxTs := iv.ToSeconds()
 	smsCount := 0
-	for i := len(c.timestamps) - 1; i >= 0; i-- {
-		age := int(now - c.timestamps[i])
+	for i := len(c.data.Timestamps) - 1; i >= 0; i-- {
+		age := int(now - c.data.Timestamps[i])
 		if age > maxTs {
 			break
 		}
@@ -39,7 +63,11 @@ func (c *State) countSms(iv config.TimeInterval) int {
 }
 
 func (c *State) IsAnyRateLimitExceeded() bool {
-	if len(c.timestamps) == 0 {
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	if len(c.data.Timestamps) == 0 {
 		return false
 	}
 	if appConfig.GetRateLimit1() != nil {
@@ -57,9 +85,58 @@ func (c *State) IsAnyRateLimitExceeded() bool {
 	return false
 }
 
-func (c *State) RememberSmsSend() {
+func (c *State) WasSentAlready(msgId message.MessageId) bool {
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	for _, id := range c.data.PendingMessageIds {
+		if id == msgId {
+			return false
+		}
+	}
+	return c.data.LastSuccessfulMessageId != nil && msgId.Compare(*c.data.LastSuccessfulMessageId) <= 0
+}
+
+// NewMessageId() obtains a new message ID and marks it as "pending"
+func (c *State) NewMessageId() message.MessageId {
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	result := c.data.NextMessageId
+	c.data.PendingMessageIds = append(c.data.PendingMessageIds, result)
+	c.data.NextMessageId = c.data.NextMessageId.NextId()
+	return result
+}
+
+// Deletes a pending message ID, returning TRUE if the deleted message ID
+// was the oldest of all pending message IDs
+func (c *State) deletePendingMessageId(msgId message.MessageId) bool {
+	for idx, id := range c.data.PendingMessageIds {
+		if id == msgId {
+			c.data.PendingMessageIds = append(c.data.PendingMessageIds[:idx], c.data.PendingMessageIds[idx+1:]...)
+			return idx == 0
+		}
+	}
+	return false
+}
+func (c *State) DiscardMessageId(msgId message.MessageId) {
+	c.deletePendingMessageId(msgId)
+}
+
+func (c *State) RememberSmsSend(msg message.Message) {
+
+	mutex.Lock()
+	if c.data.LastSuccessfulMessageId != nil && msg.Id.Compare(*c.data.LastSuccessfulMessageId) <= 0 {
+		mutex.Unlock()
+		panic("RememberSmsSend() called with message ID " + msg.Id.String() + " that is equal to/older than last successful message ID " + c.data.LastSuccessfulMessageId.String())
+	}
+
+	if c.deletePendingMessageId(msg.Id) {
+		c.data.LastSuccessfulMessageId = &msg.Id
+	}
+
 	now := time.Now().Unix()
-	c.timestamps = append(c.timestamps, Timestamp(now))
+	c.data.Timestamps = append(c.data.Timestamps, Timestamp(now))
 
 	var cutOffTimestamp Timestamp = -1
 	if appConfig.GetRateLimit1() != nil {
@@ -77,14 +154,16 @@ func (c *State) RememberSmsSend() {
 	}
 
 	if cutOffTimestamp != -1 {
-		for i := len(c.timestamps) - 1; i >= 0; i-- {
-			if c.timestamps[i] < cutOffTimestamp {
-				var newLen = len(c.timestamps) - (i + 1)
-				c.timestamps = c.timestamps[:newLen]
+		for i := len(c.data.Timestamps) - 1; i >= 0; i-- {
+			if c.data.Timestamps[i] < cutOffTimestamp {
+				var newLen = len(c.data.Timestamps) - (i + 1)
+				c.data.Timestamps = c.data.Timestamps[:newLen]
 				break
 			}
 		}
 	}
+
+	mutex.Unlock() // unlock before doing blocking I/O
 
 	// WriteState() will log an error, we'll just swallow this one here
 	// hoping that at some future time we'll be able to persist the state again....
@@ -92,20 +171,24 @@ func (c *State) RememberSmsSend() {
 }
 
 func getStateFile() string {
-	return appConfig.GetDataDirectory() + "/state.txt"
+	return appConfig.GetDataDirectory() + "/state.json"
 }
 
 func (c *State) WriteState() error {
+	mutex.Lock()
+	defer mutex.Unlock()
+	return c.writeState()
+}
 
-	var sb strings.Builder
-	for idx, ts := range c.timestamps {
-		sb.WriteString(strconv.FormatInt(int64(ts), 10))
-		if idx+1 < len(c.timestamps) {
-			sb.WriteString("\n")
-		}
+func (c *State) writeState() error {
+
+	jsonData, err := json.Marshal(c.data)
+	if err != nil {
+		panic("Error marshaling to JSON: %v" + err.Error())
 	}
+
 	log.Debug("Persisting application state to " + getStateFile())
-	err := os.WriteFile(getStateFile(), []byte(sb.String()), 0644)
+	err = os.WriteFile(getStateFile(), jsonData, 0644)
 	if err != nil {
 		msg := "Failed to write state file '" + getStateFile() + "' - " + err.Error()
 		log.Error(msg)
@@ -115,28 +198,25 @@ func (c *State) WriteState() error {
 }
 
 func Init(config *config.Config) (*State, error) {
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	appConfig = *config
 
-	result := &State{}
+	result := &State{data: newInternalState()}
 	if common.FileExist(getStateFile()) {
 		content, err := os.ReadFile(getStateFile())
 		if err != nil {
 			return nil, errors.New("Failed to read state file: " + getStateFile() + " - " + err.Error())
 		}
-		lines := strings.Split(string(content), "\n")
-
-		for _, line := range lines {
-			if strings.TrimSpace(line) != "" {
-				var v, err = common.AToInt64(line)
-				if err != nil {
-					return nil, errors.New("Failed to parse state file: " + getStateFile() + " - invalid line '" + line + "'")
-				}
-				result.timestamps = append(result.timestamps, Timestamp(v))
-			}
+		err = json.Unmarshal(content, &result.data)
+		if err != nil {
+			return nil, errors.New("Failed to deserialize JSON state file: " + getStateFile() + " - " + err.Error())
 		}
 	} else {
 		log.Info("State file '" + getStateFile() + "' does not exist, creating an empty file")
-		err := result.WriteState()
+		err := result.writeState()
 		if err != nil {
 			return nil, err
 		}

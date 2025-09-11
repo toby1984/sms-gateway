@@ -37,8 +37,9 @@ func (r *RateLimit) IsThresholdExceeded(value int) bool {
 
 type Config struct {
 	// common
-	dataDirectory string
-	logLevel      logger.LogLevel
+	dataDirectory     string
+	logLevel          logger.LogLevel
+	debugDisableModem bool
 	// REST API
 	restUser     string
 	restPassword string
@@ -49,6 +50,8 @@ type Config struct {
 	smsRecipients []string
 	rateLimit1    *RateLimit
 	rateLimit2    *RateLimit
+	// modem
+	modemInitCmds []string
 	// serial
 	serialPort        string
 	serialSpeed       int
@@ -192,6 +195,34 @@ func fail(msg string) (*Config, error) {
 	return nil, errors.New(msg)
 }
 
+func stringToBool(s string) (bool, error) {
+	lower := strings.ToLower(s)
+	switch lower {
+	case "1":
+		return true, nil
+	case "0":
+		return false, nil
+	case "y":
+		return true, nil
+	case "n":
+		return false, nil
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	case "yes":
+		return true, nil
+	case "no":
+		return false, nil
+	case "on":
+		return true, nil
+	case "off":
+		return false, nil
+	default:
+		return false, errors.New("Unrecognized boolean value '" + s + "', valid choices are '1', '0', 'y', 'n', 'yes', 'no', 'on', 'off'")
+	}
+}
+
 func LoadConfig(path string) (*Config, error) {
 
 	var result Config
@@ -221,6 +252,12 @@ func LoadConfig(path string) (*Config, error) {
 	result.dataDirectory = cfg.Section("common").Key("dataDirectory").String()
 	if strings.TrimSpace(result.dataDirectory) == "" {
 		return fail("Invalid configuration value for key 'dataDirectory' in [common] section - value cannot be empty/blank/missing")
+	}
+
+	// [common] debugDisableModem
+	result.debugDisableModem, convError = stringToBool(cfg.Section("common").Key("debugDisableModem").String())
+	if convError != nil {
+		return fail("Invalid configuration value for key 'debugDisableModem' in [common] section " + convError.Error())
 	}
 
 	// [restapi] bindIp
@@ -293,6 +330,10 @@ func LoadConfig(path string) (*Config, error) {
 	if strings.TrimSpace(result.simPin) == "" {
 		return fail("Invalid configuration value for key 'simPin' in [modem] section - value cannot be empty/blank/missing")
 	}
+
+	// [modem] initCmds
+	initCmds := cfg.Section("modem").Key("initCmds").String()
+	result.modemInitCmds = strings.Split(initCmds, "\\r")
 	return &result, nil
 }
 
@@ -351,4 +392,12 @@ func (c Config) GetSmsRecipients() []string {
 
 func (c Config) GetLogLevel() logger.LogLevel {
 	return c.logLevel
+}
+
+func (c Config) GetModemInitCmds() []string {
+	return c.modemInitCmds
+}
+
+func (c Config) IsDebugDisableModem() bool {
+	return c.debugDisableModem
 }
