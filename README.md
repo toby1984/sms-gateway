@@ -31,9 +31,38 @@ Passing 'raspi' as argument will cross-compile the program for ARM64 (Raspi 3/4/
     apt-get install usb-modeswitch-data
 ````
 
-2. Copy the files from the /etc folder in this repository into their respective locations 
+2. To setup E3351 or E3372-320h support
 
-3. Restart udev and add systemd service, re-plug the stick if necessary
+(Tested on Raspi4 running Debian 12). All of these changes are also committed to this GIT repository inside the /etc folder.
+
+- Create udev rule for your USB stick
+````
+root:/etc/udev/rules.d# cat 99-huawei.rules
+# Rule for E3351
+# ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1", ATTRS{idProduct}=="1f01", RUN{program}+="/usr/sbin/usb_modeswitch -v 12d1 -p 1f01 -I -M '55534243123456780000000000000011062000000100000000000000000000'"
+# Rule for E3372-320
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1", ATTRS{idProduct}=="1f01", RUN+="/usr/sbin/usb_modeswitch -v 12d1 -p 1f01 -M '55534243123456780000000000000011063000000100010000000000000000'"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="12d1", ATTRS{idProduct}=="155e", RUN+="/bin/bash -c 'modprobe option && echo 12d1 155e > /sys/bus/usb-serial/drivers/option1/new_id'"
+````
+-  At least for E3351 I had to activate some USB storage quirks
+
+````
+root:/etc/udev/rules.d# cat /etc/modprobe.d/huawei.conf
+options usb-storage quirks=12d1:1f01:s
+````
+
+- I also had this in my usb_modeswitch.d folder (but I think it's redundant with the udev rule)
+
+````
+root@:/etc/udev/rules.d# cat /etc/usb_modeswitch.d/switch.conf
+# Huawei E3372 and others
+# Switch from default mass storage device mode 12d1:1f01 to ...
+TargetVendor=0x12d1
+TargetProduct=0x155e
+MessageContent="55534243123456780000000000000011063000000100010000000000000000"
+````
+
+4. Restart udev and add systemd service, re-plug the stick if necessary
 
 ````
     udevadm control --reload
