@@ -280,6 +280,11 @@ func IsBlank(s string) bool {
 	return true
 }
 
+func TimeToString(t time.Time) string {
+	format := "2006-01-02 15:04:05-0700"
+	return t.Format(format)
+}
+
 func AToInt64(input string) (int64, error) {
 	return strconv.ParseInt(input, 10, 64)
 }

@@ -83,9 +83,10 @@ func (r *ModemResponse) String() string {
 }
 
 func (r *ModemResponse) getLineByPrefix(prefix string) *string {
-	for i, line := range r.Lines {
-		if strings.HasPrefix(line, prefix) {
-			return &r.Lines[i]
+	for _, line := range r.Lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, prefix) {
+			return &trimmed
 		}
 	}
 	return nil
@@ -105,12 +106,7 @@ func (r *ModemResponse) getResponseLineFor(fullAtCmd string) *string {
 	}
 	var linePrefix = "+" + atCmd[1]
 	log.Debug("Looking for line with prefix '" + linePrefix + "'")
-	result := r.getLineByPrefix(linePrefix)
-	if result != nil {
-		var trimmed = strings.TrimSpace(*result)
-		result = &trimmed
-	}
-	return result
+	return r.getLineByPrefix(linePrefix)
 }
 
 func (r *ModemResponse) isError() bool {
@@ -300,6 +296,113 @@ func SendSms(message string) SendResult {
 		}
 	}
 	return result
+}
+
+type ConnectionStatus int
+
+const (
+	CON_STATUS_NOT_REGISTERED_NOT_SEARCHING ConnectionStatus = iota
+	CON_STATUS_REGISTERED_HOME
+	CON_STATUS_NOT_REGISTERED_SEARCHING
+	CON_STATUS_NOT_REGISTERED_DENIED
+	CON_STATUS_UNKNOWN
+	CON_STATUS_REGISTERED_ROAMING
+)
+
+func (s ConnectionStatus) String() string {
+	switch s {
+	case CON_STATUS_NOT_REGISTERED_NOT_SEARCHING:
+		return "NOT_REGISTERED_NOT_SEARCHING"
+	case CON_STATUS_REGISTERED_HOME:
+		return "REGISTERED_HOME"
+	case CON_STATUS_NOT_REGISTERED_SEARCHING:
+		return "NOT_REGISTERED_SEARCHING"
+	case CON_STATUS_NOT_REGISTERED_DENIED:
+		return "NOT_REGISTERED_DENIED"
+	case CON_STATUS_UNKNOWN:
+		return "UNKNOWN"
+	case CON_STATUS_REGISTERED_ROAMING:
+		return "REGISTERED_ROAMING"
+	}
+	panic("Unhandled switch/case: " + strconv.Itoa(int(s)))
+}
+
+func GetConnectionStatus() (ConnectionStatus, error) {
+	if appConfig.IsSet(config.DEBUG_FLAG_MODEM_ALWAYS_SUCCEED) {
+		return CON_STATUS_REGISTERED_HOME, nil
+	}
+	if appConfig.IsSet(config.DEBUG_FLAG_MODEM_ALWAYS_FAIL) {
+		return CON_STATUS_UNKNOWN, errors.New("Failed because of DEBUG_FLAG_MODEM_ALWAYS_FAIL flag")
+	}
+	if needsInit() {
+		err := initModem()
+		if err != nil {
+			return CON_STATUS_UNKNOWN, err
+		}
+	}
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	err := unlockSim()
+	if err != nil {
+		return CON_STATUS_UNKNOWN, err
+	}
+
+	response, err := sendCmd("AT+CREG?", true)
+	if err != nil {
+		return CON_STATUS_UNKNOWN, err
+	}
+	/*
+			 * +CREG: <stat>[,<lac>,<ci>,<AcT>]
+			 *
+			 * <stat> (Status): A numeric value indicating the current network registration status.
+			 *
+		     * 0: Not registered. The modem isn't currently searching for a new operator.
+			 * 1: Registered to the home network.
+			 * 2: Not registered, but the modem is searching for an operator to register to.
+			 * 3: Registration denied.
+			 * 4: Unknown. For example, out of coverage.
+			 * 5: Registered and roaming.
+	*/
+	line := response.getLineByPrefix("+CREG:")
+	log.Debug("Modem response to CREG?: " + response.String())
+	if line == nil {
+		msg := "Unrecognized modem response (1)"
+		log.Error(msg)
+		return CON_STATUS_UNKNOWN, errors.New(msg)
+	}
+	parts := strings.Split(strings.TrimSpace((*line)[6:]), ",")
+	if len(parts) < 2 {
+		msg := "Unrecognized modem response (2)"
+		log.Error(msg)
+		return CON_STATUS_UNKNOWN, errors.New(msg)
+	}
+	code, err := strconv.Atoi(parts[1])
+	if err != nil {
+		msg := "Unrecognized modem response (3)"
+		log.Error(msg)
+		return CON_STATUS_UNKNOWN, errors.New(msg)
+	}
+	log.Debug("Modem response code: " + strconv.Itoa(code))
+
+	switch code {
+	case 0:
+		return CON_STATUS_NOT_REGISTERED_NOT_SEARCHING, nil
+	case 1:
+		return CON_STATUS_REGISTERED_HOME, nil
+	case 2:
+		return CON_STATUS_NOT_REGISTERED_SEARCHING, nil
+	case 3:
+		return CON_STATUS_NOT_REGISTERED_DENIED, nil
+	case 4:
+		return CON_STATUS_UNKNOWN, nil
+	case 5:
+		return CON_STATUS_REGISTERED_ROAMING, nil
+	default:
+		msg := "Modem returned unknown result code " + strconv.Itoa(code)
+		log.Error(msg)
+		return CON_STATUS_UNKNOWN, errors.New(msg)
+	}
 }
 
 func internalSendSms(message string) SendResult {

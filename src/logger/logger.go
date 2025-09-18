@@ -3,6 +3,7 @@ package logger
 import (
 	"errors"
 	"log"
+	"os"
 	"sync"
 )
 
@@ -22,6 +23,8 @@ type Logger struct {
 
 func (l *Logger) doLog(severity string, msg string) {
 	log.Printf("%s - %s - %s\n", severity, l.name, msg)
+	_ = os.Stdout.Sync()
+	_ = os.Stderr.Sync()
 }
 
 func SetLogLevel(level LogLevel) {

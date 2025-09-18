@@ -4,6 +4,7 @@ import (
 	"code-sourcery.de/sms-gateway/common"
 	"code-sourcery.de/sms-gateway/config"
 	"code-sourcery.de/sms-gateway/logger"
+	"code-sourcery.de/sms-gateway/modem"
 	"code-sourcery.de/sms-gateway/msgqueue"
 	"code-sourcery.de/sms-gateway/state"
 	"context"
@@ -25,6 +26,31 @@ type SendSmsRequest struct {
 }
 
 var httpServer *http.Server
+var startupTime time.Time
+
+type StatusResponse struct {
+	Operational     bool   `json:"operational"`
+	NetworkStatus   string `json:"network_status"`
+	StartupTime     string `json:"startup_time"`
+	UptimeInSeconds int64  `json:"uptime_in_seconds"`
+}
+
+func getStatus(c *gin.Context) {
+
+	operational := false
+	conStatus, err := modem.GetConnectionStatus()
+	if err == nil && (conStatus == modem.CON_STATUS_REGISTERED_HOME || conStatus == modem.CON_STATUS_REGISTERED_ROAMING) {
+		operational = true
+	}
+
+	uptimeInSeconds := time.Now().Unix() - startupTime.Unix()
+	response := StatusResponse{
+		Operational:     operational,
+		NetworkStatus:   conStatus.String(),
+		StartupTime:     common.TimeToString(startupTime),
+		UptimeInSeconds: uptimeInSeconds}
+	c.JSON(http.StatusOK, response)
+}
 
 func sendSms(c *gin.Context) {
 
@@ -66,6 +92,8 @@ func Shutdown() error {
 
 func Init(config *config.Config, state *state.State) error {
 
+	startupTime = time.Now()
+
 	appState = state
 
 	err := msgqueue.Init(config, appState)
@@ -99,6 +127,7 @@ func Init(config *config.Config, state *state.State) error {
 	authorized := router.Group("/", gin.BasicAuth(accounts))
 
 	authorized.POST("/sendsms", sendSms)
+	authorized.GET("/status", getStatus)
 
 	httpServer = &http.Server{
 		Addr:    host + ":" + strconv.Itoa(port),

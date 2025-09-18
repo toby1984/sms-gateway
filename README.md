@@ -138,9 +138,39 @@ keepAliveInterval=1m
 keepAliveMessage=Keep-alive SMS, please ignore.
 ````
 
+# Querying application status via the REST API
+Assuming the service runs in 127.0.0.1, port 9999 and HTTP Basic auth credentials are "restuser:password",
+you can use the following command to query the application's status:
+````
+curl -u "restuser:password" -H "Content-Type: application/json" http://127.0.0.1:9999/status
+````
+The response will look something like this:
+
+````
+{
+  "operational": true,
+  "network_status": "REGISTERED_HOME",
+  "startup_time": "2025-09-18 08:48:15+0200",
+  "uptime_in_seconds": 6
+}
+````
+
+The 'operational' boolean property indicates whether sending SMS is likely to succeed because the connection to the modem is working, 
+the modem's SIM card is unlocked and the modem has successfully registered with the network.  
+The 'network_status' gives detail information about the modem's current connection to the network. Possible values currently are:
+
+- NOT_REGISTERED_NOT_SEARCHING
+- REGISTERED_HOME
+- NOT_REGISTERED_SEARCHING
+- NOT_REGISTERED_DENIED
+- UNKNOWN
+- REGISTERED_ROAMING
+
+Those values directly map to the values 0-5 of the modem's response to the "AT+CREG?" command. 
+
 # Sending an SMS via the REST API
 
-Assuming the service runs in 127.0.0.1, port 9999 and HTTP Basic auth credentials are "restusuer:password",
+Assuming the service runs in 127.0.0.1, port 9999 and HTTP Basic auth credentials are "restuser:password",
 you can use the following command to send an SMS.
 ````
 curl -X POST -u "restuser:restpassword" -H "Content-Type: application/json" -d '{ "message": "test" }' http://localhost:9999/sendsms

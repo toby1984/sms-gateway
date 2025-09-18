@@ -1,6 +1,7 @@
 package deliveryfailure
 
 import (
+	"code-sourcery.de/sms-gateway/common"
 	"code-sourcery.de/sms-gateway/logger"
 	"code-sourcery.de/sms-gateway/message"
 	"math"
@@ -34,12 +35,11 @@ func IsDue(msgId message.MessageId) bool {
 	delaySeconds := int(math.Pow(float64(cnt), 3))
 	delay := time.Duration(delaySeconds) * time.Second
 	dueDate := failure.LastFailureTimestamp.Add(delay)
-	layout := "2006-01-02 15:04:05"
 	now := time.Now()
 	isDue := dueDate.Before(now) || dueDate.Equal(now)
 	log.Trace("Msg " + msgId.String() + " has " + strconv.Itoa(failure.FailureCount) + " delivery failures, " +
-		strconv.Itoa(delaySeconds) + " seconds delay, latest delivery failure at " + failure.LastFailureTimestamp.Format(layout) +
-		", due date is " + dueDate.Format(layout) + " => is_due: " + strconv.FormatBool(isDue))
+		strconv.Itoa(delaySeconds) + " seconds delay, latest delivery failure at " + common.TimeToString(failure.LastFailureTimestamp) +
+		", due date is " + common.TimeToString(dueDate) + " => is_due: " + strconv.FormatBool(isDue))
 	return isDue
 }
 
