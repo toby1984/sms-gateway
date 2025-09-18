@@ -22,10 +22,6 @@ var buildVersion string
 func main() {
 	log.Info("sms-gateway v" + buildVersion + " (" + buildTimestamp + " @ " + gitCommit + ")")
 
-	// --------- DEBUG code
-
-	// ---------- DEBUG code
-
 	configFile := ""
 	sendTestSms := false
 
@@ -53,6 +49,7 @@ func main() {
 		panic(err)
 	}
 	log.Debug("Configuration loaded.")
+
 	appState, err := state.Init(appConfig)
 	if err != nil {
 		panic(err)

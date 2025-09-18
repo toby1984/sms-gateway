@@ -6,10 +6,13 @@ who receives those SMS)
 
 # Features
 
+- REST endpoint for sending SMS
+- REST endpoint for querying service status (uptime, modem status)
+- Discovery of serial port interface to use based on USB vendorId and productId 
 - pending messages get stored in ${dataDir}/incoming , delivered messages get stored in ${dataDir}/sent
 - up to two configurable rate limits  
 - failed deliveries will be retried indefinitely but with exponential back-off (just delete messages from the ${dataDir}/incoming folder to get rid of those)
-- supports sending keep-alive SMS after a configurable interval has elapsed without any SMS being sent (useful to prevent mobile providers disabling prepaid cards for going unused for too long)  
+- supports sending keep-alive SMS after a configurable interval has elapsed without any SMS being sent (useful to prevent mobile providers disabling prepaid cards for going unused for too long)
 - tested with Huawei E3351 2G USB stick as well as E3372h-320 4G USB stick 
 
 # Building
@@ -89,10 +92,30 @@ dataDirectory=/apps/sms-gateway
 # debugFlags=modem_always_succeed, modem_always_fail
 
 [modem]
+
 # PIN to unlock SIM card
 # simPin=<YOUR PIN>
+
+# (optional) Commands to send when initializing the modem.
+# Multiple commands may be separated by literal '\r' 
+# (like "ATE0\rAT^CURC=0\rAT+CPOL=0")
 initCmds=AT^CURC=0
-# modem serial port
+
+# USB device ID to use for
+# locating the serial device 
+# (/dev/ttyUSB?) to use. 
+# usbVendorId=12d1
+# usbProductId=155e
+
+# Name of modem serial port device to use.
+# Either a USB device like '/dev/ttyUSB3' _OR_
+# if usbVendorId and usbProductId are given, an integer index 
+# describing which of the USB interfaces associated with the given USB 
+# device should be used. Discovered USB interfaces get 
+# sorted in ascending alphabetical order (so if discovery
+# turned up /dev/ttyUSB0, /dev/ttyUSB1 and /dev/ttyUSB2,
+# an 'serialPort=3' will yield /dev/ttyUSB2.
+#
 serialPort=/dev/ttyUSB2
 # modem serial port speed
 serialSpeed=115200

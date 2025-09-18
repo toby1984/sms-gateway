@@ -211,6 +211,22 @@ func unlockSim() error {
 }
 
 func sendBytes(bytes []byte, requiresOkOrError bool) ([]string, error) {
+	res, err := internalSendBytes(bytes, requiresOkOrError)
+	if err != nil {
+		log.Error("Closing serial port due to error " + err.Error())
+		internalClose()
+	}
+	return res, err
+}
+
+func internalSendBytes(bytes []byte, requiresOkOrError bool) ([]string, error) {
+
+	err := (*serialPort).ResetInputBuffer()
+	if err != nil {
+		log.Error("failed to drain serial input buffer: " + err.Error())
+		return []string{}, err
+	}
+
 	bytesWritten, err := (*serialPort).Write(bytes)
 	if err != nil {
 		log.Error("failed to write to serial port: " + err.Error())
@@ -499,18 +515,19 @@ func initModem() error {
 		StopBits: serial.OneStopBit,
 	}
 
-	log.Debug("Initializing modem on port " + appConfig.GetSerialPort() + ", baud rate " + strconv.Itoa(appConfig.GetSerialSpeed()))
+	serialDevName, err := appConfig.GetSerialPort()
+	log.Debug("Initializing modem on port " + serialDevName + ", baud rate " + strconv.Itoa(appConfig.GetSerialSpeed()))
 
 	// Open the serial port
-	port, err := serial.Open(appConfig.GetSerialPort(), mode)
+	port, err := serial.Open(serialDevName, mode)
 	if err != nil {
-		var msg = "failed to open serial port '" + appConfig.GetSerialPort() + "' - " + err.Error()
+		var msg = "failed to open serial port '" + serialDevName + "' - " + err.Error()
 		log.Error(msg)
 		return errors.New(msg)
 	}
 	err = port.SetReadTimeout(appConfig.GetSerialReadTimeout())
 	if err != nil {
-		var msg = "failed to set read timeout " + appConfig.GetSerialReadTimeout().String() + " on serial port '" + appConfig.GetSerialPort() + "' - " + err.Error()
+		var msg = "failed to set read timeout " + appConfig.GetSerialReadTimeout().String() + " on serial port '" + serialDevName + "' - " + err.Error()
 		log.Error(msg)
 		return errors.New(msg)
 	}
@@ -526,7 +543,7 @@ func initModem() error {
 
 	for _, cmd := range appConfig.GetModemInitCmds() {
 		log.Debug("Executing modem init cmd: '" + cmd + "'")
-		resp, err := sendCmd(cmd, true)
+		resp, err := sendCmd(cmd, false)
 		if err != nil {
 			cleanUp()
 			return err
@@ -549,9 +566,13 @@ func Close() {
 
 	mutex.Lock()
 	defer mutex.Unlock()
+	internalClose()
+}
+
+func internalClose() {
 
 	if serialPort != nil {
-		log.Debug("Closing serial port")
+		log.Info("Closing serial port")
 		_ = (*serialPort).Close()
 		serialPort = nil
 	}

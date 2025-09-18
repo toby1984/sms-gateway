@@ -3,9 +3,11 @@ package config
 import (
 	"code-sourcery.de/sms-gateway/common"
 	"code-sourcery.de/sms-gateway/logger"
+	"code-sourcery.de/sms-gateway/serialportdiscovery"
 	"code-sourcery.de/sms-gateway/util"
 	_ "embed"
 	"errors"
+	"fmt"
 	"gopkg.in/ini.v1"
 	"os"
 	"regexp"
@@ -78,6 +80,7 @@ type Config struct {
 	// modem
 	modemInitCmds []string
 	// serial
+	usbDeviceId       *common.UsbDeviceId
 	serialPort        string
 	serialSpeed       int
 	serialReadTimeout time.Duration
@@ -85,7 +88,7 @@ type Config struct {
 
 var log = logger.GetLogger("config")
 
-func ParseRateLimit(rateLimit string) (*util.RateLimit, error) {
+func parseRateLimit(rateLimit string) (*util.RateLimit, error) {
 
 	if rateLimit == "" || strings.TrimSpace(rateLimit) == "" {
 		return nil, nil
@@ -100,14 +103,14 @@ func ParseRateLimit(rateLimit string) (*util.RateLimit, error) {
 	if err != nil {
 		return nil, errors.New("Invalid rate limit string (Threshold): '" + rateLimit + "'")
 	}
-	interval, err := ParseTimeInterval(match[2])
+	interval, err := parseTimeInterval(match[2])
 	if err != nil {
 		return nil, errors.New("Invalid rate limit string (time Interval): '" + rateLimit + "'")
 	}
 	return &util.RateLimit{Interval: *interval, Threshold: threshold}, nil
 }
 
-func ParseTimeInterval(interval string) (*util.TimeInterval, error) {
+func parseTimeInterval(interval string) (*util.TimeInterval, error) {
 	re := regexp.MustCompile(`^(\d+)([smhdw])`)
 	match := re.FindStringSubmatch(interval)
 	if match == nil || len(match) != 3 {
@@ -152,6 +155,21 @@ func stringToBool(s string) (bool, error) {
 	default:
 		return false, errors.New("Unrecognized boolean value '" + s + "', valid choices are '1', '0', 'y', 'n', 'yes', 'no', 'on', 'off'")
 	}
+}
+
+// ParseHex16Bit parses assumes an unsigned hexadecimal 16-bit number as an input string (like 'beef' or '12ab')
+// and turns it into an uint16.
+func ParseHex16Bit(hexString string) (uint16, error) {
+	parsedInt64, err := strconv.ParseInt(hexString, 16, 16)
+	if err != nil {
+		fmt.Println("Error parsing hexadecimal string '"+hexString+"'", err)
+		return 0, err
+	}
+	if parsedInt64 < 0 || parsedInt64 > 65535 {
+		fmt.Println("Hexadecimal value '"+hexString+"' must be within 16-bit unsigned range", err)
+		return 0, err
+	}
+	return uint16(parsedInt64), nil
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -219,13 +237,13 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	// [sms] rateLimit1
-	result.rateLimit1, convError = ParseRateLimit(cfg.Section("[sms]").Key("rateLimit1").String())
+	result.rateLimit1, convError = parseRateLimit(cfg.Section("[sms]").Key("rateLimit1").String())
 	if convError != nil {
 		return fail("Invalid configuration value for key 'rateLimit1' in [sms] section " + convError.Error())
 	}
 
 	// [sms] rateLimit2
-	result.rateLimit2, convError = ParseRateLimit(cfg.Section("[sms]").Key("rateLimit2").String())
+	result.rateLimit2, convError = parseRateLimit(cfg.Section("[sms]").Key("rateLimit2").String())
 	if convError != nil {
 		return fail("Invalid configuration value for key 'rateLimit2' in [sms] section " + convError.Error())
 	}
@@ -243,7 +261,7 @@ func LoadConfig(path string) (*Config, error) {
 	// [sms] keepAliveInterval
 	iv := cfg.Section("sms").Key("keepAliveInterval").String()
 	if iv != "" || strings.TrimSpace(iv) != "" {
-		keepAlive, convError := ParseTimeInterval(iv)
+		keepAlive, convError := parseTimeInterval(iv)
 		if convError != nil {
 			return fail("Invalid configuration value for key 'keepAliveInterval' in [sms] section - " + convError.Error())
 		}
@@ -254,10 +272,36 @@ func LoadConfig(path string) (*Config, error) {
 		}
 	}
 
+	// [modem] usbDeviceId
+	usbVendorId := cfg.Section("modem").Key("usbVendorId").MustString("")
+	usbProductId := cfg.Section("modem").Key("usbProductId").MustString("")
+	if usbVendorId != "" || usbProductId != "" {
+		if usbVendorId == "" || usbProductId == "" {
+			return fail("Either none or both of [modem] usbVendorId and usbProductId need to be specified")
+		}
+		vendorId, convError := ParseHex16Bit(usbVendorId)
+		if convError != nil {
+			return fail("Invalid configuration value for key 'usbVendorId' in [modem] section - " + convError.Error())
+		}
+		productId, convError := ParseHex16Bit(usbProductId)
+		if convError != nil {
+			return fail("Invalid configuration value for key 'usbProductId' in [modem] section - " + convError.Error())
+		}
+		result.usbDeviceId = &common.UsbDeviceId{VendorId: vendorId, ProductId: productId}
+	} else {
+		result.usbDeviceId = nil
+	}
+
 	// [modem] serialPort
-	result.serialPort = cfg.Section("modem").Key("serialPort").String()
-	if strings.TrimSpace(result.serialPort) == "" {
-		return fail("Invalid configuration value for key 'serialPort' in [modem] section - value cannot be empty/blank/missing")
+	result.serialPort = strings.TrimSpace(cfg.Section("modem").Key("serialPort").String())
+	if result.serialPort == "" {
+		return fail("A value for [modem] serialPort is required")
+	}
+	if result.usbDeviceId != nil {
+		val, convError := strconv.Atoi(result.serialPort)
+		if convError != nil || val < 0 {
+			return fail("When [modem] usbVendorId/usbProductId is configured, [modem] serialPort has to be a positive integer number.")
+		}
 	}
 
 	// [modem] serialSpeed
@@ -318,8 +362,27 @@ func (c Config) GetSerialSpeed() int {
 	return c.serialSpeed
 }
 
-func (c Config) GetSerialPort() string {
-	return c.serialPort
+func (c Config) GetSerialPort() (string, error) {
+
+	if c.GetUsbDeviceId() != nil {
+		iFaces, err := serialportdiscovery.DiscoverUsbInterfaces(*c.usbDeviceId)
+		if err != nil {
+			return "", err
+		}
+		if len(iFaces) == 0 {
+			return "", errors.New("serial-port auto discovery found no usb interfaces")
+		}
+
+		idx, _ := strconv.Atoi(c.serialPort)
+		if len(iFaces) <= idx {
+			return "", errors.New("serial-port auto discovery found only " + strconv.Itoa(len(iFaces)) + " interfaces but" +
+				"[modem] serialPort config requested interface #" + strconv.Itoa(idx))
+		}
+		discovered := iFaces[idx]
+		log.Info("Going to use device #" + strconv.Itoa(idx) + " [" + discovered + "]")
+		return discovered, nil
+	}
+	return c.serialPort, nil
 }
 
 func (c Config) GetSerialReadTimeout() time.Duration {
@@ -363,4 +426,8 @@ func (c Config) IsSet(flag DebugFlag) bool {
 }
 func (c Config) IsNotSet(flag DebugFlag) bool {
 	return !c.IsSet(flag)
+}
+
+func (c Config) GetUsbDeviceId() *common.UsbDeviceId {
+	return c.usbDeviceId
 }
