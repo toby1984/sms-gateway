@@ -161,11 +161,11 @@ func queryPinState() (ModemPinState, error) {
 			return MODEM_PIN_NOT_REQUIRED, nil
 		}
 		if strings.Contains(*line, "SIM PIN") {
-			log.Debug("SIM card needs PIN")
+			log.Info("SIM card needs PIN")
 			return MODEM_PIN_REQUIRED, nil
 		}
 		if strings.HasPrefix(*line, "SIM PUK") {
-			log.Debug("SIM card needs PUK")
+			log.Warn("SIM card needs PUK")
 			return MODEM_PIN_PUK_REQUIRED, nil
 		}
 	} else {
@@ -186,6 +186,7 @@ func sendPin(pin string) error {
 	if resp.isError() {
 		return errors.New("Unlocking PIN returned error response: " + resp.String())
 	}
+	log.Info("Successfully unlocked modem using PIN")
 	return nil
 }
 
