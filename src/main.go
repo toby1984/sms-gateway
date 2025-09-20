@@ -44,11 +44,16 @@ func main() {
 	if configFile == "" {
 		panic("Invalid command line - expected config file as only argument")
 	}
-	appConfig, err := config.LoadConfig(configFile)
+	appConfig, err := config.LoadConfig(configFile, true)
 	if err != nil {
 		panic(err)
 	}
-	log.Debug("Configuration loaded.")
+	log.Info("Configuration loaded, using log level " + appConfig.GetLogLevel().String())
+	logger.SetLogLevel(appConfig.GetLogLevel())
+
+	if config.StartWatching(configFile) == nil {
+		defer config.StopWatching()
+	}
 
 	appState, err := state.Init(appConfig)
 	if err != nil {

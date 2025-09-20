@@ -39,8 +39,14 @@ func getStatus(c *gin.Context) {
 
 	operational := false
 	conStatus, err := modem.GetConnectionStatus()
-	if err == nil && (conStatus == modem.CON_STATUS_REGISTERED_HOME || conStatus == modem.CON_STATUS_REGISTERED_ROAMING) {
-		operational = true
+	if err == nil {
+		if conStatus == modem.CON_STATUS_REGISTERED_HOME || conStatus == modem.CON_STATUS_REGISTERED_ROAMING {
+			operational = true
+		} else {
+			log.Debug("Modem is in status " + conStatus.String())
+		}
+	} else {
+		log.Debug("Modem error. " + err.Error())
 	}
 
 	uptimeInSeconds := time.Now().Unix() - startupTime.Unix()

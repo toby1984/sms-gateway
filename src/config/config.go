@@ -172,12 +172,15 @@ func ParseHex16Bit(hexString string) (uint16, error) {
 	return uint16(parsedInt64), nil
 }
 
-func LoadConfig(path string) (*Config, error) {
+func LoadConfig(path string, createIfMissing bool) (*Config, error) {
 
 	var result Config
 	var convError error
 
 	if !common.FileExist(path) {
+		if !createIfMissing {
+			return nil, errors.New("Config file does not exist: " + path)
+		}
 		err := os.WriteFile(path, DEFAULT_CONFIG, 0600)
 		if err != nil {
 			return fail("Config file " + path + " does not exist and creating a default file failed with error " + err.Error())
@@ -195,7 +198,6 @@ func LoadConfig(path string) (*Config, error) {
 	if convError != nil {
 		return fail("Invalid configuration value for key 'logLevel' in [common] section " + convError.Error())
 	}
-	logger.SetLogLevel(result.logLevel)
 
 	// [common] dataDirectory
 	result.dataDirectory = cfg.Section("common").Key("dataDirectory").String()

@@ -4,7 +4,9 @@ import (
 	"errors"
 	"log"
 	"os"
+	"strconv"
 	"sync"
+	"sync/atomic"
 )
 
 type LogLevel int
@@ -14,8 +16,6 @@ const LEVEL_DEBUG LogLevel = 4
 const LEVEL_INFO LogLevel = 3
 const LEVEL_WARN LogLevel = 2
 const LEVEL_ERROR LogLevel = 1
-
-var currentLogLevel = LEVEL_DEBUG
 
 type Logger struct {
 	name string
@@ -28,7 +28,7 @@ func (l *Logger) doLog(severity string, msg string) {
 }
 
 func SetLogLevel(level LogLevel) {
-	currentLogLevel = level
+	GetLogManager().currentLogLevel.Store(level)
 }
 
 func StringToLevel(level string) (LogLevel, error) {
@@ -51,28 +51,47 @@ func StringToLevel(level string) (LogLevel, error) {
 	return result, e
 }
 
+func (l LogLevel) String() string {
+	var res string
+	switch l {
+	case LEVEL_TRACE:
+		res = "TRACE"
+	case LEVEL_DEBUG:
+		res = "DEBUG"
+	case LEVEL_INFO:
+		res = "INFO"
+	case LEVEL_WARN:
+		res = "WARN"
+	case LEVEL_ERROR:
+		res = "ERROR"
+	default:
+		panic("Unhandled log level string: " + strconv.Itoa(int(l)))
+	}
+	return res
+}
+
 func GetLogLevel() LogLevel {
-	return currentLogLevel
+	return GetLogManager().currentLogLevel.Load().(LogLevel)
 }
 
 func (l *Logger) IsTraceEnabled() bool {
-	return currentLogLevel >= LEVEL_TRACE
+	return GetLogLevel() >= LEVEL_TRACE
 }
 
 func (l *Logger) IsDebugEnabled() bool {
-	return currentLogLevel >= LEVEL_DEBUG
+	return GetLogLevel() >= LEVEL_DEBUG
 }
 
 func (l *Logger) IsInfoEnabled() bool {
-	return currentLogLevel >= LEVEL_INFO
+	return GetLogLevel() >= LEVEL_INFO
 }
 
 func (l *Logger) IsWarnEnabled() bool {
-	return currentLogLevel >= LEVEL_WARN
+	return GetLogLevel() >= LEVEL_WARN
 }
 
 func (l *Logger) IsErrorEnabled() bool {
-	return currentLogLevel >= LEVEL_ERROR
+	return GetLogLevel() >= LEVEL_ERROR
 }
 
 func (l *Logger) Trace(msg string) {
@@ -106,15 +125,18 @@ func (l *Logger) Error(msg string) {
 }
 
 type LogManager struct {
-	loggers_mutex sync.Mutex
-	loggers       map[string]*Logger
+	loggers_mutex   sync.Mutex
+	loggers         map[string]*Logger
+	currentLogLevel atomic.Value
 }
 
 func newLogManager() *LogManager {
-	return &LogManager{
+	res := LogManager{
 		loggers_mutex: sync.Mutex{},
 		loggers:       make(map[string]*Logger),
 	}
+	res.currentLogLevel.Store(LEVEL_INFO)
+	return &res
 }
 
 var loggers = sync.OnceValue(func() *LogManager {
