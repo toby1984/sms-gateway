@@ -72,6 +72,19 @@ func listFilesInInbox() ([]string, error) {
 func StoreMessage(id message.MessageId, text string) error {
 
 	creationTime := time.Now()
+
+	maxLen := appConfig.GetMaxMessageLength()
+	if maxLen > 0 && len(text) > maxLen {
+		log.Warn("Message " + id.String() + " has length " + strconv.Itoa(len(text)) +
+			" which exceeds configured maxLen " + strconv.Itoa(maxLen) + ", will truncate message")
+		log.Warn("Original message: " + text)
+		text = text[:maxLen]
+		if len(text) > 3 {
+			text = text[:len(text)-3]
+			text = text + "..."
+		}
+	}
+
 	msg := message.Message{Id: id, CreationTimestamp: creationTime}
 	msg.AbsPath = inboxDir + "/" + msg.ToFileName()
 	msg.FileName = msg.ToFileName()

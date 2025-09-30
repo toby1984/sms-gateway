@@ -140,6 +140,11 @@ password=<REST API PASSWORD>
 # Default is to keep retrying.
 dropOnRateLimit=false
 
+# When defined, limits how characters to send at most with a single SMS.
+# Extra text will get truncated and replaced with a '...' ellipsis.
+# The original message text will get logged at log level WARN.
+maxLength=150
+
 # comma-separated list of subscriber numbers to send the SMS to.
 # Note that an SMS cannot have multiple recipients so
 # one SMS will be sent to each recipient (which obviously drives up costs).

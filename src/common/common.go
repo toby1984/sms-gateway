@@ -2,7 +2,6 @@ package common
 
 import (
 	"bufio"
-	"code-sourcery.de/sms-gateway/logger"
 	"errors"
 	"io"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+
+	"code-sourcery.de/sms-gateway/logger"
 )
 
 // this must be a VARIABLE and _NOT_ a constant so that "go build -ldflags="-X ..." can change this symbol's
@@ -58,6 +59,8 @@ func (opt Optional[T]) IsPresent() bool {
 
 type Comparator[T any] func(T, T) bool
 
+type StringMapping[T any] func(T) string
+
 type Predicate[T any] func(T) bool
 
 type ListVisitor[T any] func(T, int) bool
@@ -80,6 +83,17 @@ type Iterable[T any] interface {
 
 type PointerIterable[T any] interface {
 	Iterator() PointerIterator[T]
+}
+
+func Join[T any](data []T, separator string, mapping StringMapping[T]) string {
+	var builder strings.Builder
+	for idx, flag := range data {
+		builder.WriteString(mapping(flag))
+		if idx+1 < len(data) {
+			builder.WriteString(separator)
+		}
+	}
+	return builder.String()
 }
 
 // Check whether a given filesystem path refers to a regular file.

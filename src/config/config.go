@@ -29,7 +29,7 @@ const (
 
 type DebugFlag int32
 
-func parseDebugFlag(s string) (DebugFlag, error) {
+func ParseDebugFlag(s string) (DebugFlag, error) {
 
 	trimmed := strings.TrimSpace(s)
 	switch trimmed {
@@ -43,11 +43,21 @@ func parseDebugFlag(s string) (DebugFlag, error) {
 	return DEBUG_FLAG_NONE, errors.New("Unknown debug flag: " + s)
 }
 
+func (f DebugFlag) String() string {
+	switch f {
+	case DEBUG_FLAG_MODEM_ALWAYS_FAIL:
+		return "modem_always_fail"
+	case DEBUG_FLAG_MODEM_ALWAYS_SUCCEED:
+		return "modem_always_succeed"
+	}
+	panic("Internal error, unknown debug flag " + strconv.Itoa(int(f)))
+}
+
 func stringToDebugFlags(s string) (int32, error) {
 	result := int32(0)
 
 	for _, token := range strings.Split(s, ",") {
-		flag, err := parseDebugFlag(token)
+		flag, err := ParseDebugFlag(token)
 		if err != nil {
 			return 0, err
 		}
@@ -72,6 +82,7 @@ type Config struct {
 	restPort     int
 	bindIp       string
 	// SIM
+	maxLength         int
 	simPin            string
 	smsRecipients     []string
 	rateLimit1        *util.RateLimit
@@ -250,9 +261,24 @@ func LoadConfig(path string, createIfMissing bool) (*Config, error) {
 			return fail("Invalid configuration boolean value for key 'dropOnRateLimit' in [sms] section " + convError.Error())
 		}
 		if result.dropOnRateLimit {
-			log.Warn("Will DROP any SMS exceeding the rate limit instead of queueing them.")
+			log.Warn("Will DROP any SMS exceeding the rate limit instead of queueing them")
 		}
 	}
+
+	// [sms] maxLength
+	sMaxLen := cfg.Section("sms").Key("maxLength").MustString("")
+	if sMaxLen != "" {
+		result.maxLength, convError = strconv.Atoi(sMaxLen)
+		if convError != nil {
+			return fail("Key 'maxLength' in [sms] section must be a positive integer" + convError.Error())
+		}
+		if result.maxLength < 1 {
+			return fail("Value for key 'maxLength' in [sms] section but be greater than zero")
+		}
+	} else {
+		result.maxLength = -1
+	}
+
 	// [sms] rateLimit1
 	result.rateLimit1, convError = parseRateLimit(cfg.Section("sms").Key("rateLimit1").String())
 	if convError != nil {
@@ -451,6 +477,14 @@ func (c Config) GetKeepAliveMessage() string {
 func (c Config) IsSet(flag DebugFlag) bool {
 	return (c.debugFlags & int32(flag)) != 0
 }
+
+func (c *Config) SetDebugFlags(flags []DebugFlag) {
+	c.debugFlags = 0
+	for _, flag := range flags {
+		c.debugFlags = c.debugFlags | int32(flag)
+	}
+}
+
 func (c Config) IsNotSet(flag DebugFlag) bool {
 	return !c.IsSet(flag)
 }
@@ -461,4 +495,8 @@ func (c Config) GetUsbDeviceId() *common.UsbDeviceId {
 
 func (c Config) IsDropOnRateLimit() bool {
 	return c.dropOnRateLimit
+}
+
+func (c Config) GetMaxMessageLength() int {
+	return c.maxLength
 }
