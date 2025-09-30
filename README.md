@@ -134,6 +134,12 @@ user=<REST API USER>
 password=<REST API PASSWORD>
 
 [sms]
+# Whether to keep retrying to send
+# SMS that failed delivery because of rate limit violations
+# or simply discard them.
+# Default is to keep retrying.
+dropOnRateLimit=false
+
 # comma-separated list of subscriber numbers to send the SMS to.
 # Note that an SMS cannot have multiple recipients so
 # one SMS will be sent to each recipient (which obviously drives up costs).

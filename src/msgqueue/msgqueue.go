@@ -1,13 +1,6 @@
 package msgqueue
 
 import (
-	"code-sourcery.de/sms-gateway/common"
-	"code-sourcery.de/sms-gateway/config"
-	"code-sourcery.de/sms-gateway/deliveryfailure"
-	"code-sourcery.de/sms-gateway/logger"
-	"code-sourcery.de/sms-gateway/message"
-	"code-sourcery.de/sms-gateway/modem"
-	"code-sourcery.de/sms-gateway/state"
 	"errors"
 	"os"
 	"strconv"
@@ -15,6 +8,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"code-sourcery.de/sms-gateway/common"
+	"code-sourcery.de/sms-gateway/config"
+	"code-sourcery.de/sms-gateway/deliveryfailure"
+	"code-sourcery.de/sms-gateway/logger"
+	"code-sourcery.de/sms-gateway/message"
+	"code-sourcery.de/sms-gateway/modem"
+	"code-sourcery.de/sms-gateway/state"
 )
 
 var log = logger.GetLogger("msgqueue")
@@ -24,8 +25,8 @@ var dataDir string
 var inboxDir string
 var sentDir string
 
-var appConfig *config.Config
 var appState *state.State
+var appConfig *config.Config
 
 var inboxWatcherMutex sync.Mutex
 var shutdownTriggered atomic.Bool
@@ -122,10 +123,14 @@ func inboxWatcher() {
 				} else {
 
 					if deliveryfailure.IsDue(msg.Id) {
-						err := sendMessage(msg)
+						rateLimitExceeded, err := sendMessage(msg)
 						if err != nil {
-							deliveryfailure.DeliveryFailed(msg.Id)
-							log.Error("Failed to sent '" + absPath + "' - " + err.Error())
+							if rateLimitExceeded && appConfig.IsDropOnRateLimit() {
+								deliveryfailure.DeliveryAborted(msg.Id)
+							} else {
+								deliveryfailure.DeliveryFailed(msg.Id)
+								log.Error("Failed to sent '" + absPath + "' - " + err.Error())
+							}
 						} else {
 							deliveryfailure.DeliverySuccessful(msg.Id)
 						}
@@ -138,13 +143,13 @@ func inboxWatcher() {
 	log.Info("Stopping to watch inbox")
 }
 
-func sendMessage(msg *message.Message) error {
+func sendMessage(msg *message.Message) (bool, error) {
 
 	if !appState.WasSentAlready(msg.Id) {
 		rawBytes, err := common.ReadFile(msg.AbsPath)
 		if err != nil {
 			log.Error("Failed to read file '" + msg.AbsPath + "' - " + err.Error())
-			return err
+			return false, err
 		}
 		if len(*rawBytes) == 0 {
 			log.Info("File " + msg.AbsPath + " has length of zero bytes, just deleting it.")
@@ -152,11 +157,21 @@ func sendMessage(msg *message.Message) error {
 			if err != nil {
 				log.Warn("Failed to delete file '" + msg.AbsPath + "' - " + err.Error())
 			}
-			return nil
+			return false, nil
 		}
 		result := modem.SendSms(string(*rawBytes))
 		if !result.Success {
-			return errors.New("Failed to send SMS: " + result.Reason.String() + ", details: " + result.Details)
+			if result.Reason == modem.MODEM_ERR_RATE_LIMIT_EXCEEDED {
+				if appConfig.IsDropOnRateLimit() {
+					err = os.Remove(msg.AbsPath)
+					if err != nil {
+						log.Warn("Failed to delete file '" + msg.AbsPath + "' after rate limit got exceeded - " + err.Error())
+					}
+					log.Warn("DISCARDED message '" + msg.AbsPath + "' after rate limit got exceeded")
+				}
+				return true, errors.New("Rate limit exceeded")
+			}
+			return false, errors.New("Failed to send SMS: " + result.Reason.String() + ", details: " + result.Details)
 		}
 		log.Info("Message sent successfully: " + msg.String())
 
@@ -171,7 +186,7 @@ func sendMessage(msg *message.Message) error {
 	} else {
 		log.Debug("Moved file '" + msg.AbsPath + "' -> " + newFile)
 	}
-	return nil
+	return false, nil
 }
 
 func Init(c *config.Config, state *state.State) error {
@@ -183,8 +198,8 @@ func Init(c *config.Config, state *state.State) error {
 	}
 	defer modem.Close()
 
-	appConfig = c
 	appState = state
+	appConfig = c
 
 	// create top-level directory
 	dataDir, err = createDir(c.GetDataDirectory(), "messages")

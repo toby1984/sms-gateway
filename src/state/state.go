@@ -1,16 +1,18 @@
 package state
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
+	"strconv"
+	"sync"
+	"time"
+
 	"code-sourcery.de/sms-gateway/common"
 	"code-sourcery.de/sms-gateway/config"
 	"code-sourcery.de/sms-gateway/logger"
 	"code-sourcery.de/sms-gateway/message"
 	"code-sourcery.de/sms-gateway/util"
-	"encoding/json"
-	"errors"
-	"os"
-	"sync"
-	"time"
 )
 
 var log = logger.GetLogger("state")
@@ -61,8 +63,8 @@ func (c *State) countSms(iv util.TimeInterval) int {
 	maxTs := iv.ToSeconds()
 	smsCount := 0
 	for i := len(c.data.Timestamps) - 1; i >= 0; i-- {
-		age := int(now - c.data.Timestamps[i])
-		if age > maxTs {
+		ageInSeconds := int(now - c.data.Timestamps[i])
+		if ageInSeconds > maxTs {
 			break
 		}
 		smsCount++
@@ -81,14 +83,24 @@ func (c *State) IsAnyRateLimitExceeded() bool {
 	if appConfig.GetRateLimit1() != nil {
 		var cnt = c.countSms(appConfig.GetRateLimit1().Interval)
 		if appConfig.GetRateLimit1().IsThresholdExceeded(cnt) {
+			log.Error("Rate limit #1 (" + appConfig.GetRateLimit1().String() + ") exceeded , count = " + strconv.Itoa(cnt))
 			return true
+		} else {
+			log.Debug("Rate limit #1 (" + appConfig.GetRateLimit1().String() + ") NOT exceeded , count = " + strconv.Itoa(cnt))
 		}
+	} else {
+		log.Debug("Rate limit #1 not configured")
 	}
 	if appConfig.GetRateLimit2() != nil {
 		var cnt = c.countSms(appConfig.GetRateLimit2().Interval)
 		if appConfig.GetRateLimit2().IsThresholdExceeded(cnt) {
+			log.Error("Rate limit #2 (" + appConfig.GetRateLimit2().String() + ") exceeded , count = " + strconv.Itoa(cnt))
 			return true
+		} else {
+			log.Debug("Rate limit #2 (" + appConfig.GetRateLimit2().String() + ") NOT exceeded , count = " + strconv.Itoa(cnt))
 		}
+	} else {
+		log.Debug("Rate limit #2 not configured")
 	}
 	return false
 }

@@ -1,19 +1,20 @@
 package config
 
 import (
-	"code-sourcery.de/sms-gateway/common"
-	"code-sourcery.de/sms-gateway/logger"
-	"code-sourcery.de/sms-gateway/serialportdiscovery"
-	"code-sourcery.de/sms-gateway/util"
 	_ "embed"
 	"errors"
 	"fmt"
-	"gopkg.in/ini.v1"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"code-sourcery.de/sms-gateway/common"
+	"code-sourcery.de/sms-gateway/logger"
+	"code-sourcery.de/sms-gateway/serialportdiscovery"
+	"code-sourcery.de/sms-gateway/util"
+	"gopkg.in/ini.v1"
 )
 
 //go:embed default-config.conf
@@ -77,6 +78,7 @@ type Config struct {
 	rateLimit2        *util.RateLimit
 	keepAliveInterval *util.TimeInterval
 	keepAliveMessage  string
+	dropOnRateLimit   bool
 	// modem
 	modemInitCmds []string
 	// serial
@@ -238,16 +240,39 @@ func LoadConfig(path string, createIfMissing bool) (*Config, error) {
 		return fail("Invalid configuration value for key 'port' in [restapi] section " + convError.Error())
 	}
 
+	// [sms] dropOnRateLimit
+	s := cfg.Section("sms").Key("dropOnRateLimit").MustString("")
+	if s == "" {
+		result.dropOnRateLimit = false
+	} else {
+		result.dropOnRateLimit, convError = stringToBool(s)
+		if convError != nil {
+			return fail("Invalid configuration boolean value for key 'dropOnRateLimit' in [sms] section " + convError.Error())
+		}
+		if result.dropOnRateLimit {
+			log.Warn("Will DROP any SMS exceeding the rate limit instead of queueing them.")
+		}
+	}
 	// [sms] rateLimit1
-	result.rateLimit1, convError = parseRateLimit(cfg.Section("[sms]").Key("rateLimit1").String())
+	result.rateLimit1, convError = parseRateLimit(cfg.Section("sms").Key("rateLimit1").String())
 	if convError != nil {
 		return fail("Invalid configuration value for key 'rateLimit1' in [sms] section " + convError.Error())
 	}
+	if result.rateLimit1 != nil {
+		log.Info("Rate limit #1: " + result.rateLimit1.String())
+	} else {
+		log.Info("Rate limit #1 not configured")
+	}
 
 	// [sms] rateLimit2
-	result.rateLimit2, convError = parseRateLimit(cfg.Section("[sms]").Key("rateLimit2").String())
+	result.rateLimit2, convError = parseRateLimit(cfg.Section("sms").Key("rateLimit2").String())
 	if convError != nil {
 		return fail("Invalid configuration value for key 'rateLimit2' in [sms] section " + convError.Error())
+	}
+	if result.rateLimit1 != nil {
+		log.Info("Rate limit #2: " + result.rateLimit2.String())
+	} else {
+		log.Info("Rate limit #2 not configured")
 	}
 
 	// [sms] recipients
@@ -432,4 +457,8 @@ func (c Config) IsNotSet(flag DebugFlag) bool {
 
 func (c Config) GetUsbDeviceId() *common.UsbDeviceId {
 	return c.usbDeviceId
+}
+
+func (c Config) IsDropOnRateLimit() bool {
+	return c.dropOnRateLimit
 }

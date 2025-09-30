@@ -1,6 +1,7 @@
 package util
 
 import (
+	"strconv"
 	"time"
 )
 
@@ -49,6 +50,10 @@ func (iv *TimeInterval) ToSeconds() int {
 		panic("Internal error, unhandled switch/case: " + iv.Unit.String())
 	}
 	return iv.Value * factor
+}
+
+func (iv *TimeInterval) String() string {
+	return strconv.Itoa(iv.ToSeconds()) + " seconds"
 }
 
 func (iv *TimeInterval) IsShorterThan(elapsed time.Duration) bool {

@@ -1,13 +1,14 @@
 package deliveryfailure
 
 import (
-	"code-sourcery.de/sms-gateway/common"
-	"code-sourcery.de/sms-gateway/logger"
-	"code-sourcery.de/sms-gateway/message"
 	"math"
 	"strconv"
 	"sync"
 	"time"
+
+	"code-sourcery.de/sms-gateway/common"
+	"code-sourcery.de/sms-gateway/logger"
+	"code-sourcery.de/sms-gateway/message"
 )
 
 type DeliveryFailure struct {
@@ -62,4 +63,11 @@ func DeliverySuccessful(id message.MessageId) {
 	defer failuresLock.Unlock()
 	delete(failures, id)
 	log.Debug("Msg " + id.String() + " got delivered successfully")
+}
+
+func DeliveryAborted(id message.MessageId) {
+	failuresLock.Lock()
+	defer failuresLock.Unlock()
+	delete(failures, id)
+	log.Warn("Delivery of msg " + id.String() + " got aborted")
 }

@@ -1,16 +1,17 @@
 package modem
 
 import (
-	"code-sourcery.de/sms-gateway/config"
-	"code-sourcery.de/sms-gateway/logger"
-	"code-sourcery.de/sms-gateway/state"
 	"errors"
 	"fmt"
-	"go.bug.st/serial"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+
+	"code-sourcery.de/sms-gateway/config"
+	"code-sourcery.de/sms-gateway/logger"
+	"code-sourcery.de/sms-gateway/state"
+	"go.bug.st/serial"
 )
 
 /*
@@ -461,6 +462,7 @@ func internalSendSms(message string) SendResult {
 	for _, recipient := range appConfig.GetSmsRecipients() {
 
 		if appState.IsAnyRateLimitExceeded() {
+			log.Error("Rate limit exceeded (current recipient: " + recipient + ")")
 			return SendResult{false, MODEM_ERR_RATE_LIMIT_EXCEEDED, "Rate limit exceeded"}
 		}
 
