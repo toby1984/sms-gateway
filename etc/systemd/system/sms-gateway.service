@@ -1,10 +1,12 @@
 [Unit]
-Description=Simple Golang SMS gateway 
+Description=Simple Golang SMS gateway
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/apps/sms-gateway/sms-gateway /apps/sms-gateway/configuration.ini
 Type=simple
 Restart=on-failure
+RestartSec=60s
 
 [Install]
 WantedBy=multi-user.target
